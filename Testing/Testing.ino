@@ -1,10 +1,9 @@
-// Desk alarm - TEST 3: sensor + buzzers + LCD roasts
-// If the HC-SR04 hasn't seen you within DESK_CM for GONE_AFTER_MS:
+// Desk alarm - TEST 4: real desk mode
+// The HC-SR04 watches your chair. If it hasn't seen you within DESK_CM
+// for GONE_AFTER_MS, the alarm goes off:
 //   - active buzzer blares nonstop
 //   - passive buzzer does a fast, rising siren sweep
-//   - LCD jumps straight to a new roast
-// The LCD rotates a random roast every 10 seconds the whole time.
-// Open Tools > Serial Monitor at 9600 baud to see the distance readings.
+// Open Tools > Serial Monitor at 9600 baud for live readings.
 
 // LCD is switched off for now. Change 0 to 1 to turn it back on.
 #define USE_LCD 0
@@ -16,31 +15,29 @@ LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 #endif
 
 // ---------- Pins ----------
-
 const int TRIG_PIN   = 9;   // HC-SR04 Trig
 const int ECHO_PIN   = 10;  // HC-SR04 Echo
 const int ACTIVE_BZ  = 8;   // active buzzer +  (on/off only)
-const int PASSIVE_BZ = 13;  // passive buzzer + (moved from 12, the LCD uses 12 now)
+const int PASSIVE_BZ = 13;  // passive buzzer + (driven with tone())
 // A0 is left unconnected on purpose: its random noise seeds random()
 
-// ---------- Alarm settings ----------
-// Bodies and clothes are soft and curved, so the sensor only gets a clean
-// echo off a person some of the time. Instead of needing every reading to
-// see you, ONE good reading counts as "you're here" for GONE_AFTER_MS.
-const int DESK_CM = 120;                 // "at desk" if anything is closer than this
-const unsigned long GONE_AFTER_MS = 3000; // no hits for this long = you left
+// ============ DESK SETTINGS - tune these ============
+// Sit normally and watch the Serial Monitor, then set DESK_CM about
+// 20 cm above the distance you usually read.
+const int DESK_CM = 120;                  // "at desk" if anything is closer than this
+const unsigned long GONE_AFTER_MS = 5000; // no hits for this long = you left
+const unsigned long STARTUP_GRACE_MS = 10000; // time to sit down after power-on
+const bool SOUND_ON = true;               // false = silent testing, monitor only
+// =====================================================
 
-// true  = buzzers go off when the sensor SEES something (easy hand test)
-// false = buzzers go off when you're GONE (the real procrastination alarm)
-const bool ALARM_WHEN_SEEN = true;
-const int HAND_CM = 30;   // hand-test mode: only things closer than this set it off
-
+// Siren sweep settings (passive buzzer)
 const int SWEEP_LOW_HZ  = 1200;
 const int SWEEP_HIGH_HZ = 4000;  // these little buzzers are loudest around 2-4 kHz
 const int SWEEP_STEP_HZ = 200;
 const unsigned long SWEEP_STEP_MS = 4;   // smaller = faster sweep
 
-const unsigned long SENSOR_EVERY_MS = 60;  // HC-SR04 needs ~60 ms between pings
+const unsigned long SENSOR_EVERY_MS = 60;   // HC-SR04 needs ~60 ms between pings
+const unsigned long REPORT_EVERY_MS = 500;  // Serial Monitor summary twice a second
 
 #if USE_LCD
 // ---------- LCD messages ----------
@@ -60,16 +57,22 @@ const char* messages[] = {
 };
 const int messageCount = sizeof(messages) / sizeof(messages[0]);
 const unsigned long MESSAGE_EVERY_MS = 10000; // 10 seconds
+unsigned long lastMessageTime = 0;
+int lastMessage = -1;
 #endif
 
 // ---------- State ----------
-unsigned long lastSeen = 0;
 bool alarmOn = false;
+unsigned long lastSeen = 0;
 int sweepHz = SWEEP_LOW_HZ;
 unsigned long lastSweep = 0;
 unsigned long lastPing = 0;
-unsigned long lastMessageTime = 0;
-int lastMessage = -1;
+unsigned long lastReport = 0;
+long lastCm = -1;
+int pings = 0, hits = 0;              // counted per report window
+unsigned long awayStart = 0;
+unsigned long totalAwayMs = 0;        // the procrastination metric
+int timesLeft = 0;
 
 long readDistanceCm() {
   digitalWrite(TRIG_PIN, LOW);
@@ -80,6 +83,14 @@ long readDistanceCm() {
   long duration = pulseIn(ECHO_PIN, HIGH, 30000);  // 0 = no echo
   if (duration == 0) return -1;
   return duration / 58;
+}
+
+void printDuration(unsigned long ms) {
+  unsigned long s = ms / 1000;
+  Serial.print(s / 60);
+  Serial.print("m ");
+  Serial.print(s % 60);
+  Serial.print("s");
 }
 
 #if USE_LCD
@@ -122,65 +133,97 @@ void setup() {
   pinMode(ACTIVE_BZ, OUTPUT);
   pinMode(PASSIVE_BZ, OUTPUT);
   Serial.begin(9600);
-  Serial.println("Desk alarm test: sensor + buzzers + LCD");
+  Serial.println("=== Desk alarm: real desk mode ===");
+  Serial.print("DESK_CM = ");       Serial.print(DESK_CM);
+  Serial.print("   GONE_AFTER = "); Serial.print(GONE_AFTER_MS / 1000);
+  Serial.print("s   SOUND = ");     Serial.println(SOUND_ON ? "on" : "off");
 
-  // Startup self-test: each buzzer on its own for half a second
-  Serial.println("Self-test: ACTIVE buzzer (D8)...");
-  digitalWrite(ACTIVE_BZ, HIGH);
-  delay(500);
-  digitalWrite(ACTIVE_BZ, LOW);
-  delay(300);
-  Serial.println("Self-test: PASSIVE buzzer (D13)...");
-  tone(PASSIVE_BZ, 2500);
-  delay(500);
-  noTone(PASSIVE_BZ);
-  Serial.println("Self-test done.");
+  if (SOUND_ON) {
+    // Startup self-test: each buzzer on its own for half a second
+    Serial.println("Self-test: ACTIVE buzzer (D8)...");
+    digitalWrite(ACTIVE_BZ, HIGH);
+    delay(500);
+    digitalWrite(ACTIVE_BZ, LOW);
+    delay(300);
+    Serial.println("Self-test: PASSIVE buzzer (D13)...");
+    tone(PASSIVE_BZ, 2500);
+    delay(500);
+    noTone(PASSIVE_BZ);
+  }
 
 #if USE_LCD
   lcd.begin(16, 2);
   randomSeed(analogRead(A0));
   displayRandomMessage();
 #endif
-  lastSeen = millis() - GONE_AFTER_MS;  // start out as "nobody seen yet"
+
+  // Count as "seen" right now so you get STARTUP_GRACE_MS to sit down
+  lastSeen = millis() + STARTUP_GRACE_MS - GONE_AFTER_MS;
+  Serial.print("You have ");
+  Serial.print(STARTUP_GRACE_MS / 1000);
+  Serial.println("s to sit down...");
+  Serial.println("dist(cm)  hit-rate  status   last-seen  | away total / times left");
 }
 
 void loop() {
   unsigned long now = millis();
 
-  // 1) Check the sensor every SENSOR_EVERY_MS
+  // 1) Check the sensor
   if (now - lastPing >= SENSOR_EVERY_MS) {
     lastPing = now;
-    long cm = readDistanceCm();
-    bool atDesk = (cm > 0 && cm < DESK_CM);
-
-    if (atDesk) lastSeen = now;
+    lastCm = readDistanceCm();
+    bool hit = (lastCm > 0 && lastCm < DESK_CM);
+    pings++;
+    if (hit) { hits++; lastSeen = now; }
 
     bool wasOn = alarmOn;
-    if (ALARM_WHEN_SEEN) {
-      // Hand test: instant on/off, only for something really close
-      alarmOn = (cm > 0 && cm < HAND_CM);
-    } else {
-      // Real alarm: you're gone after GONE_AFTER_MS with no hits
-      alarmOn = (now - lastSeen >= GONE_AFTER_MS);
-    }
-#if USE_LCD
-    if (alarmOn && !wasOn) displayRandomMessage();   // roast them right away
-#endif
+    alarmOn = ((long)(now - lastSeen) >= (long)GONE_AFTER_MS);
 
-    Serial.print(cm < 0 ? String("out of range") : String(cm) + " cm");
-    Serial.print(atDesk ? "  HIT " : "  miss");
-    Serial.println(alarmOn ? "  -> ALARM!" : "  -> quiet");
+    if (alarmOn && !wasOn) {
+      awayStart = now;
+      timesLeft++;
+      Serial.println(">>> YOU LEFT THE DESK - ALARM ON <<<");
+#if USE_LCD
+      displayRandomMessage();   // roast them right away
+#endif
+    } else if (!alarmOn && wasOn) {
+      totalAwayMs += now - awayStart;
+      Serial.print(">>> BACK AT DESK after ");
+      printDuration(now - awayStart);
+      Serial.println(" <<<");
+    }
+  }
+
+  // 2) Summary line twice a second
+  if (now - lastReport >= REPORT_EVERY_MS) {
+    lastReport = now;
+    if (lastCm < 0) Serial.print("  ---   ");
+    else { Serial.print("  "); Serial.print(lastCm); Serial.print(" cm  "); }
+    Serial.print("   ");
+    Serial.print(pings ? (hits * 100 / pings) : 0);
+    Serial.print("%      ");
+    Serial.print(alarmOn ? "GONE " : "DESK ");
+    Serial.print("   ");
+    long since = (long)(now - lastSeen);
+    Serial.print(since < 0 ? 0 : since / 1000.0, 1);
+    Serial.print("s ago   | ");
+    unsigned long away = totalAwayMs + (alarmOn ? now - awayStart : 0);
+    printDuration(away);
+    Serial.print(" / ");
+    Serial.println(timesLeft);
+    pings = 0;
+    hits = 0;
   }
 
 #if USE_LCD
-  // 2) Rotate the LCD message every 10 seconds
+  // 3) Rotate the LCD message every 10 seconds
   if (millis() - lastMessageTime >= MESSAGE_EVERY_MS) {
     displayRandomMessage();
   }
 #endif
 
-  // 3) Drive the buzzers
-  if (alarmOn) {
+  // 4) Drive the buzzers
+  if (alarmOn && SOUND_ON) {
     digitalWrite(ACTIVE_BZ, HIGH);              // nonstop blare
     if (millis() - lastSweep >= SWEEP_STEP_MS) {
       lastSweep = millis();
