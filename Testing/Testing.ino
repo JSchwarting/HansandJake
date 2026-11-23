@@ -115,6 +115,18 @@ void setup() {
   Serial.begin(9600);
   Serial.println("Desk alarm test: sensor + buzzers + LCD");
 
+  // Startup self-test: each buzzer on its own for half a second
+  Serial.println("Self-test: ACTIVE buzzer (D8)...");
+  digitalWrite(ACTIVE_BZ, HIGH);
+  delay(500);
+  digitalWrite(ACTIVE_BZ, LOW);
+  delay(300);
+  Serial.println("Self-test: PASSIVE buzzer (D13)...");
+  tone(PASSIVE_BZ, 2500);
+  delay(500);
+  noTone(PASSIVE_BZ);
+  Serial.println("Self-test done.");
+
   lcd.begin(16, 2);
   randomSeed(analogRead(A0));
   displayRandomMessage();
