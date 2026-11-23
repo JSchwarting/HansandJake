@@ -1,5 +1,5 @@
 // Desk alarm - TEST 3: sensor + buzzers + LCD roasts
-// If the HC-SR04 does NOT see you within DESK_CM:
+// If the HC-SR04 hasn't seen you within DESK_CM for GONE_AFTER_MS:
 //   - active buzzer blares nonstop
 //   - passive buzzer does a fast, rising siren sweep
 //   - LCD jumps straight to a new roast
@@ -19,15 +19,18 @@ const int PASSIVE_BZ = 13;  // passive buzzer + (moved from 12, the LCD uses 12 
 // A0 is left unconnected on purpose: its random noise seeds random()
 
 // ---------- Alarm settings ----------
-const int DESK_CM       = 80;  // you count as "at desk" if closer than this
-const int MISSES_TO_ARM = 3;   // empty readings in a row before the alarm starts
+// Bodies and clothes are soft and curved, so the sensor only gets a clean
+// echo off a person some of the time. Instead of needing every reading to
+// see you, ONE good reading counts as "you're here" for GONE_AFTER_MS.
+const int DESK_CM = 120;                 // "at desk" if anything is closer than this
+const unsigned long GONE_AFTER_MS = 3000; // no hits for this long = you left
 
 const int SWEEP_LOW_HZ  = 1200;
 const int SWEEP_HIGH_HZ = 4000;  // these little buzzers are loudest around 2-4 kHz
 const int SWEEP_STEP_HZ = 200;
 const unsigned long SWEEP_STEP_MS = 4;   // smaller = faster sweep
 
-const unsigned long SENSOR_EVERY_MS = 100;
+const unsigned long SENSOR_EVERY_MS = 60;  // HC-SR04 needs ~60 ms between pings
 
 // ---------- LCD messages ----------
 const char* messages[] = {
@@ -48,7 +51,7 @@ const int messageCount = sizeof(messages) / sizeof(messages[0]);
 const unsigned long MESSAGE_EVERY_MS = 10000; // 10 seconds
 
 // ---------- State ----------
-int misses = 0;
+unsigned long lastSeen = 0;
 bool alarmOn = false;
 int sweepHz = SWEEP_LOW_HZ;
 unsigned long lastSweep = 0;
@@ -121,17 +124,14 @@ void loop() {
     long cm = readDistanceCm();
     bool atDesk = (cm > 0 && cm < DESK_CM);
 
-    if (atDesk) {
-      misses = 0;
-    } else if (misses < MISSES_TO_ARM) {
-      misses++;
-    }
+    if (atDesk) lastSeen = now;
 
     bool wasOn = alarmOn;
-    alarmOn = (misses >= MISSES_TO_ARM);
+    alarmOn = (now - lastSeen >= GONE_AFTER_MS);
     if (alarmOn && !wasOn) displayRandomMessage();   // roast them right away
 
     Serial.print(cm < 0 ? String("out of range") : String(cm) + " cm");
+    Serial.print(atDesk ? "  HIT " : "  miss");
     Serial.println(alarmOn ? "  -> GONE, ALARM!" : "  -> at desk");
   }
 
