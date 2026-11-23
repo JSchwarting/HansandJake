@@ -1,18 +1,27 @@
-// Desk alarm - TEST 2: sensor + buzzers, alarm when you're GONE
-// If the HC-SR04 does NOT see you within DESK_CM, both buzzers go off:
+// Desk alarm - TEST 3: sensor + buzzers + LCD roasts
+// If the HC-SR04 does NOT see you within DESK_CM:
 //   - active buzzer blares nonstop
 //   - passive buzzer does a fast, rising siren sweep
+//   - LCD jumps straight to a new roast
+// The LCD rotates a random roast every 10 seconds the whole time.
 // Open Tools > Serial Monitor at 9600 baud to see the distance readings.
+
+#include <LiquidCrystal.h>
+
+// ---------- Pins ----------
+// LCD pins: RS, E, D4, D5, D6, D7
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 
 const int TRIG_PIN   = 9;   // HC-SR04 Trig
 const int ECHO_PIN   = 10;  // HC-SR04 Echo
 const int ACTIVE_BZ  = 8;   // active buzzer +  (on/off only)
-const int PASSIVE_BZ = 12;  // passive buzzer + (driven with tone())
+const int PASSIVE_BZ = 13;  // passive buzzer + (moved from 12, the LCD uses 12 now)
+// A0 is left unconnected on purpose: its random noise seeds random()
 
+// ---------- Alarm settings ----------
 const int DESK_CM       = 80;  // you count as "at desk" if closer than this
 const int MISSES_TO_ARM = 3;   // empty readings in a row before the alarm starts
 
-// Siren sweep settings (passive buzzer)
 const int SWEEP_LOW_HZ  = 1200;
 const int SWEEP_HIGH_HZ = 4000;  // these little buzzers are loudest around 2-4 kHz
 const int SWEEP_STEP_HZ = 200;
@@ -20,11 +29,32 @@ const unsigned long SWEEP_STEP_MS = 4;   // smaller = faster sweep
 
 const unsigned long SENSOR_EVERY_MS = 100;
 
+// ---------- LCD messages ----------
+const char* messages[] = {
+  "THE COUNCIL WATCHES",
+  "YOUR ANCESTORS WEEP",
+  "LOCK IN OR PERISH",
+  "THE GRIND DEMANDS",
+  "WEAKNESS DETECTED",
+  "SKILL ISSUE",
+  "NPC BEHAVIOR",
+  "ABSOLUTE CINEMA",
+  "BRO IS STRUGGLING",
+  "DIGNITY: -100",
+  "MOTIVATION.EXE",
+  "PEAK DISAPPOINTMENT"
+};
+const int messageCount = sizeof(messages) / sizeof(messages[0]);
+const unsigned long MESSAGE_EVERY_MS = 10000; // 10 seconds
+
+// ---------- State ----------
 int misses = 0;
 bool alarmOn = false;
 int sweepHz = SWEEP_LOW_HZ;
 unsigned long lastSweep = 0;
 unsigned long lastPing = 0;
+unsigned long lastMessageTime = 0;
+int lastMessage = -1;
 
 long readDistanceCm() {
   digitalWrite(TRIG_PIN, LOW);
@@ -37,13 +67,49 @@ long readDistanceCm() {
   return duration / 58;
 }
 
+// The LCD is only 16 characters wide, so longer messages
+// get split onto the second line at the last space that fits.
+void printWrapped(const char* msg) {
+  lcd.clear();
+  int len = strlen(msg);
+  if (len <= 16) {
+    lcd.setCursor(0, 0);
+    lcd.print(msg);
+    return;
+  }
+  int split = 16;
+  while (split > 0 && msg[split] != ' ') split--;
+  if (split == 0) split = 16;              // no space: hard cut
+
+  lcd.setCursor(0, 0);
+  for (int i = 0; i < split; i++) lcd.write(msg[i]);
+
+  int start = (msg[split] == ' ') ? split + 1 : split;
+  lcd.setCursor(0, 1);
+  for (int i = start; i < len && i < start + 16; i++) lcd.write(msg[i]);
+}
+
+void displayRandomMessage() {
+  int newMessage;
+  do {                                     // no repeats in a row
+    newMessage = random(messageCount);
+  } while (newMessage == lastMessage);
+  lastMessage = newMessage;
+  printWrapped(messages[newMessage]);
+  lastMessageTime = millis();
+}
+
 void setup() {
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
   pinMode(ACTIVE_BZ, OUTPUT);
   pinMode(PASSIVE_BZ, OUTPUT);
   Serial.begin(9600);
-  Serial.println("Desk alarm test: alarm when nobody is at the desk");
+  Serial.println("Desk alarm test: sensor + buzzers + LCD");
+
+  lcd.begin(16, 2);
+  randomSeed(analogRead(A0));
+  displayRandomMessage();
 }
 
 void loop() {
@@ -60,13 +126,21 @@ void loop() {
     } else if (misses < MISSES_TO_ARM) {
       misses++;
     }
+
+    bool wasOn = alarmOn;
     alarmOn = (misses >= MISSES_TO_ARM);
+    if (alarmOn && !wasOn) displayRandomMessage();   // roast them right away
 
     Serial.print(cm < 0 ? String("out of range") : String(cm) + " cm");
     Serial.println(alarmOn ? "  -> GONE, ALARM!" : "  -> at desk");
   }
 
-  // 2) Drive the buzzers
+  // 2) Rotate the LCD message every 10 seconds
+  if (millis() - lastMessageTime >= MESSAGE_EVERY_MS) {
+    displayRandomMessage();
+  }
+
+  // 3) Drive the buzzers
   if (alarmOn) {
     digitalWrite(ACTIVE_BZ, HIGH);              // nonstop blare
     if (millis() - lastSweep >= SWEEP_STEP_MS) {
