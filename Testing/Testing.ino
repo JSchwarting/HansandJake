@@ -25,6 +25,10 @@ const int PASSIVE_BZ = 13;  // passive buzzer + (moved from 12, the LCD uses 12 
 const int DESK_CM = 120;                 // "at desk" if anything is closer than this
 const unsigned long GONE_AFTER_MS = 3000; // no hits for this long = you left
 
+// true  = buzzers go off when the sensor SEES something (easy hand test)
+// false = buzzers go off when you're GONE (the real procrastination alarm)
+const bool ALARM_WHEN_SEEN = true;
+
 const int SWEEP_LOW_HZ  = 1200;
 const int SWEEP_HIGH_HZ = 4000;  // these little buzzers are loudest around 2-4 kHz
 const int SWEEP_STEP_HZ = 200;
@@ -113,6 +117,7 @@ void setup() {
   lcd.begin(16, 2);
   randomSeed(analogRead(A0));
   displayRandomMessage();
+  lastSeen = millis() - GONE_AFTER_MS;  // start out as "nobody seen yet"
 }
 
 void loop() {
@@ -127,12 +132,13 @@ void loop() {
     if (atDesk) lastSeen = now;
 
     bool wasOn = alarmOn;
-    alarmOn = (now - lastSeen >= GONE_AFTER_MS);
+    bool gone = (now - lastSeen >= GONE_AFTER_MS);
+    alarmOn = ALARM_WHEN_SEEN ? !gone : gone;
     if (alarmOn && !wasOn) displayRandomMessage();   // roast them right away
 
     Serial.print(cm < 0 ? String("out of range") : String(cm) + " cm");
     Serial.print(atDesk ? "  HIT " : "  miss");
-    Serial.println(alarmOn ? "  -> GONE, ALARM!" : "  -> at desk");
+    Serial.println(alarmOn ? "  -> ALARM!" : "  -> quiet");
   }
 
   // 2) Rotate the LCD message every 10 seconds
