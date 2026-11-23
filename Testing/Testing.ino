@@ -24,7 +24,7 @@ const int PASSIVE_BZ = 13;  // passive buzzer + (driven with tone())
 // ============ DESK SETTINGS - tune these ============
 // Sit normally and watch the Serial Monitor, then set DESK_CM about
 // 20 cm above the distance you usually read.
-const int DESK_CM = 120;                  // "at desk" if anything is closer than this
+const int DESK_CM = 20;                   // "at desk" if anything is closer than this (our sensor tops out ~20 cm)
 const unsigned long GONE_AFTER_MS = 5000; // no hits for this long = you left
 const unsigned long STARTUP_GRACE_MS = 10000; // time to sit down after power-on
 const bool SOUND_ON = true;               // false = silent testing, monitor only
