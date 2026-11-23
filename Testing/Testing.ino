@@ -6,11 +6,16 @@
 // The LCD rotates a random roast every 10 seconds the whole time.
 // Open Tools > Serial Monitor at 9600 baud to see the distance readings.
 
-#include <LiquidCrystal.h>
+// LCD is switched off for now. Change 0 to 1 to turn it back on.
+#define USE_LCD 0
 
-// ---------- Pins ----------
+#if USE_LCD
+#include <LiquidCrystal.h>
 // LCD pins: RS, E, D4, D5, D6, D7
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+#endif
+
+// ---------- Pins ----------
 
 const int TRIG_PIN   = 9;   // HC-SR04 Trig
 const int ECHO_PIN   = 10;  // HC-SR04 Echo
@@ -37,6 +42,7 @@ const unsigned long SWEEP_STEP_MS = 4;   // smaller = faster sweep
 
 const unsigned long SENSOR_EVERY_MS = 60;  // HC-SR04 needs ~60 ms between pings
 
+#if USE_LCD
 // ---------- LCD messages ----------
 const char* messages[] = {
   "THE COUNCIL WATCHES",
@@ -54,6 +60,7 @@ const char* messages[] = {
 };
 const int messageCount = sizeof(messages) / sizeof(messages[0]);
 const unsigned long MESSAGE_EVERY_MS = 10000; // 10 seconds
+#endif
 
 // ---------- State ----------
 unsigned long lastSeen = 0;
@@ -75,6 +82,7 @@ long readDistanceCm() {
   return duration / 58;
 }
 
+#if USE_LCD
 // The LCD is only 16 characters wide, so longer messages
 // get split onto the second line at the last space that fits.
 void printWrapped(const char* msg) {
@@ -106,6 +114,7 @@ void displayRandomMessage() {
   printWrapped(messages[newMessage]);
   lastMessageTime = millis();
 }
+#endif
 
 void setup() {
   pinMode(TRIG_PIN, OUTPUT);
@@ -127,9 +136,11 @@ void setup() {
   noTone(PASSIVE_BZ);
   Serial.println("Self-test done.");
 
+#if USE_LCD
   lcd.begin(16, 2);
   randomSeed(analogRead(A0));
   displayRandomMessage();
+#endif
   lastSeen = millis() - GONE_AFTER_MS;  // start out as "nobody seen yet"
 }
 
@@ -152,17 +163,21 @@ void loop() {
       // Real alarm: you're gone after GONE_AFTER_MS with no hits
       alarmOn = (now - lastSeen >= GONE_AFTER_MS);
     }
+#if USE_LCD
     if (alarmOn && !wasOn) displayRandomMessage();   // roast them right away
+#endif
 
     Serial.print(cm < 0 ? String("out of range") : String(cm) + " cm");
     Serial.print(atDesk ? "  HIT " : "  miss");
     Serial.println(alarmOn ? "  -> ALARM!" : "  -> quiet");
   }
 
+#if USE_LCD
   // 2) Rotate the LCD message every 10 seconds
   if (millis() - lastMessageTime >= MESSAGE_EVERY_MS) {
     displayRandomMessage();
   }
+#endif
 
   // 3) Drive the buzzers
   if (alarmOn) {
