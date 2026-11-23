@@ -28,6 +28,7 @@ const unsigned long GONE_AFTER_MS = 3000; // no hits for this long = you left
 // true  = buzzers go off when the sensor SEES something (easy hand test)
 // false = buzzers go off when you're GONE (the real procrastination alarm)
 const bool ALARM_WHEN_SEEN = true;
+const int HAND_CM = 30;   // hand-test mode: only things closer than this set it off
 
 const int SWEEP_LOW_HZ  = 1200;
 const int SWEEP_HIGH_HZ = 4000;  // these little buzzers are loudest around 2-4 kHz
@@ -132,8 +133,13 @@ void loop() {
     if (atDesk) lastSeen = now;
 
     bool wasOn = alarmOn;
-    bool gone = (now - lastSeen >= GONE_AFTER_MS);
-    alarmOn = ALARM_WHEN_SEEN ? !gone : gone;
+    if (ALARM_WHEN_SEEN) {
+      // Hand test: instant on/off, only for something really close
+      alarmOn = (cm > 0 && cm < HAND_CM);
+    } else {
+      // Real alarm: you're gone after GONE_AFTER_MS with no hits
+      alarmOn = (now - lastSeen >= GONE_AFTER_MS);
+    }
     if (alarmOn && !wasOn) displayRandomMessage();   // roast them right away
 
     Serial.print(cm < 0 ? String("out of range") : String(cm) + " cm");
