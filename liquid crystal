@@ -1,0 +1,62 @@
+
+#include <LiquidCrystal.h>
+
+// LCD pins: RS, E, D4, D5, D6, D7
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+
+// Messages to display
+const char* messages[] = {
+  "THE COUNCIL WATCHES",
+  "YOUR ANCESTORS WEEP",
+  "LOCK IN OR PERISH",
+  "THE GRIND DEMANDS",
+  "WEAKNESS DETECTED",
+  "SKILL ISSUE",
+  "NPC BEHAVIOR",
+  "ABSOLUTE CINEMA",
+  "BRO IS STRUGGLING",
+  "DIGNITY: -100",
+  "MOTIVATION.EXE",
+  "PEAK DISAPPOINTMENT"
+};
+
+const int messageCount = 12;
+
+unsigned long previousMillis = 0;
+const unsigned long interval = 10000; // 10 seconds
+
+int lastMessage = -1;
+
+void setup() {
+  lcd.begin(16, 2);
+
+  randomSeed(analogRead(A0));
+
+  displayRandomMessage();
+}
+
+void loop() {
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+    displayRandomMessage();
+  }
+
+  // Other Arduino code can run here!
+}
+
+void displayRandomMessage() {
+  int newMessage;
+
+  // Prevent consecutive repeats
+  do {
+    newMessage = random(messageCount);
+  } while (newMessage == lastMessage);
+
+  lastMessage = newMessage;
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(messages[newMessage]);
+}
